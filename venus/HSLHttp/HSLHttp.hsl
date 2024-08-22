@@ -1,0 +1,919 @@
+//
+// Library: HSL HTTP Library
+// 
+// Author: Will Turman 
+//
+//
+// Modification History
+// 11/20/2014 - Created - v1.0
+// 12/10/2014 - Modified - v1.1
+//            - added support for Request Content Types: application/json, text/plain, application/x-www-form-urlencoded
+// 04/02/2015 - Modified - v1.3 
+//            - StatusCode updated to return as an integer (i.e. 200, 404) instead 
+//              of a string (i.e. OK, Forbidden, Not //Found)
+// 04/21/2015 - added Upload command - submits multipart/form-data file uploads
+// 06/22/2015 - Refactored - v1.4
+//            - Made error responses return content, implemented 0 status code for non-HTTP request errors. 
+// 09/06/2016 - Added support for application/xml content-type
+// 03/14/2016 - Added support for setting a non-default timeout for requests - v1.7
+// 04/03/2018 - Major Version 2.0
+//            - Broke up functions for HTTP Methods GET / POST / PUT / DELETE
+//            - Added TLS 1.2 Support
+//            - Added support for text/xml content-type
+//            - Added support for flexible accepted content-types
+//            - Refactored library support functions 
+//            - Added SetTraceLevel and StatusTrace support function
+// 07/30/2020 - Modified - v2.6
+//            - Updated HSLHttp Status Code handling
+
+
+#ifndef __HSLHttp__
+    #define __HSLHttp__  1
+
+    #ifndef __TraceLevel_hsl__
+        #include "ASWStandard\\TraceLevel\\TraceLevel.hsl"
+    #endif
+
+    #ifndef __ASWGLOBAL_hsl__
+        #include "ASWStandard\\ASWGlobal\\ASWGlobal.hsl"
+    #endif
+
+    #ifndef __HSLStrLib_hsl__
+        #include "HSLStrLib.hsl"
+    #endif
+
+namespace HSLHttp
+{
+	 
+    //HTTP Method Constants 
+    const variable GET("GET");
+    const variable POST("POST");
+    const variable PUT("PUT");
+    const variable DELETE("DELETE");
+
+    //HTTP Authentication Header Constants
+    const variable Authentication_Basic("Basic");
+    const variable Authentication_None("");
+    const variable Authentication_BearerToken("BearerToken");
+
+    //HTTP Request Content-Type Header Constants
+    const variable ContentType_Plaintext("text/plain");
+    const variable ContentType_JSON("application/json");
+    const variable ContentType_XML("application/xml");
+    const variable ContentType_Form("application/x-www-form-urlencoded");
+    const variable ContentType_None("");
+
+    //HTTP Library Variables
+    private const variable HSLHttp_Class("Hamilton.HSLHttp");
+    private global variable HSLHttp_TraceLevel(TRACE_LEVEL_RELEASE);
+    private const variable HSLHttp_TraceSource("HSLHttp");
+
+    private static variable blnSimulation(hslFalse);
+
+    //FormatTrace Return Constants
+    private const variable CMD_FAIL(0);
+    private const variable CMD_START(1);
+    private const variable CMD_COMPLETE(2);
+    private const variable CMD_ERROR(3);
+    private const variable CMD_PROGRESS(4);
+    private const variable CMD_ERRCOMPLETE(5);
+
+    //-------------------------------------------------------------------------------------------
+    // Private / Support Function Declarations
+    //-------------------------------------------------------------------------------------------
+
+    private function CheckObject(object i_objObjectToCheck) variable;
+
+    private function StatusTrace(variable i_intTraceLevel, variable i_strFunctionName, variable i_intState, variable i_strMessage ) void;
+
+    private function CheckString(variable i_varVariableToCheck, variable i_strTraceEntry ) variable;
+
+    private function CheckIntegerRange(variable i_varVariableToCheck, variable i_strTraceEntry, variable i_intMin, variable i_intMax) variable;
+
+
+    //-------------------------------------------------------------------------------------------
+    // Function Definitions 
+    //-------------------------------------------------------------------------------------------
+
+
+    //-------------------------------------------------------------------------------------------
+    // Initialize
+    //-------------------------------------------------------------------------------------------
+    function Initialize( object& o_objHttp ) variable 
+    {
+        
+        object objHttp;
+        string strReturn("");
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Creating Hamilton HTTP object: " + HSLHttp_Class);
+
+        objHttp.CreateObject( "Hamilton.HSLHttp" );
+        if ( objHttp.IsNull( ) )
+        {
+            FormatTrace( GetFunctionName(), "()", CMD_ERROR, "Hamilton.HSLHttp object could not be created." );
+            return(1);
+        }
+
+        o_objHttp = objHttp;
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Hamilton HTTP object Created.");
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+
+        return(0);
+
+    }   // Initialize
+
+
+
+    //-------------------------------------------------------------------------------------------
+    // Release
+    //-------------------------------------------------------------------------------------------
+    function Release( object i_objHttp ) variable 
+    {
+        
+        string strReturn("");
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Releasing Hamilton HTTP object.");
+
+        if ( !i_objHttp.IsNull( ) )
+        {
+            i_objHttp.ReleaseObject();
+        }
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Hamilton HTTP object Released.");
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+
+        return(0);
+
+    }   //Release
+
+
+
+    //-------------------------------------------------------------------------------------------
+    // HttpGET
+    //-------------------------------------------------------------------------------------------
+    function HttpGET( object objHttp, variable i_strUri, variable& o_intStatusCode) variable
+    {
+        variable response("");
+        o_intStatusCode = 0;
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+
+        if(!CheckString(i_strUri, "i_strUri"))
+        {
+            response = "Parameter " + "i_strUri" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if( i_strUri == "" )
+        {
+            response = "Invalid Request - Uri is empty - i_strUri must be set to an HTTP Resource.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Request Uri: " + i_strUri);
+
+        if(!CheckObject(objHttp))
+        {
+            response = HSLHttp_Class + "has not been created. Use HSLHttp::Initialize before calling other library functions.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if(blnSimulation)
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_COMPLETE, "Simulated.");
+            o_intStatusCode = 200;
+            response = GetFunctionName() + "Simulated";
+            return(response);
+        }
+
+        response = objHttp.HttpGET(i_strUri, o_intStatusCode);
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Response Status Code: " + IStr(o_intStatusCode));
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Response Content: " + response);
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+
+        return(response);
+
+    }   //HttpGET
+
+
+    // --------------------------------------------------------------------------------------
+    // function HttpPOST
+    // --------------------------------------------------------------------------------------
+    function HttpPOST( object objHttp, variable i_strUri, variable i_strContent, variable i_strContentType, variable& o_intStatusCode) variable
+    {
+        variable response("");
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+
+        if(!CheckString(i_strUri, "i_strUri"))
+        {
+            response = "Parameter " + "i_strUri" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if( i_strUri == "" )
+        {
+            response = "Invalid Request - Uri is empty - i_strUri must be set to an HTTP Resource.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Request Uri: " + i_strUri);
+
+        if(!CheckString(i_strContent, "i_strContent"))
+        {
+            response = "Parameter " + "i_strContent" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+        if(!CheckString(i_strContentType, "i_strContentType"))
+        {
+            response = "Parameter " + "i_strContentType" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if(!CheckObject(objHttp))
+        {
+            response = HSLHttp_Class + "has not been created. Use HSLHttp::Initialize before calling other library functions.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if(blnSimulation)
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_COMPLETE, "Simulated.");
+            o_intStatusCode = 200;
+            response = "Simulated";
+            return(response);
+        }
+
+        response = objHttp.HttpPOST(i_strUri, i_strContent, i_strContentType, o_intStatusCode);
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Response Status Code: " + IStr(o_intStatusCode));
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Response Content: " + response);
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+
+        return(response);
+
+    }   // HttpPOST
+
+
+    // --------------------------------------------------------------------------------------
+    // function HttpPUT
+    // --------------------------------------------------------------------------------------
+    function HttpPUT( object objHttp, variable i_strUri, variable i_strContent, variable i_strContentType, variable& o_intStatusCode) variable
+    {
+        variable response("");
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+
+        if(!CheckString(i_strUri, "i_strUri"))
+        {
+            response = "Parameter " + "i_strUri" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if( i_strUri == "" )
+        {
+            response = "Invalid Request - Uri is empty - i_strUri must be set to an HTTP Resource.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Request Uri: " + i_strUri);
+
+        if(!CheckString(i_strContent, "i_strContent"))
+        {
+            response = "Parameter " + "i_strContent" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+        if(!CheckString(i_strContentType, "i_strContentType"))
+        {
+            response = "Parameter " + "i_strContentType" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if(!CheckObject(objHttp))
+        {
+            response = HSLHttp_Class + "has not been created. Use HSLHttp::Initialize before calling other library functions.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if(blnSimulation)
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_COMPLETE, "Simulated.");
+            o_intStatusCode = 200;
+            response = "Simulated";
+            return(response);
+        }
+
+        response = objHttp.HttpPUT(i_strUri, i_strContent, i_strContentType, o_intStatusCode);
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Response Status Code: " + IStr(o_intStatusCode));
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Response Content: " + response);
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+
+        return(response);
+
+    }   // HttpPUT
+
+
+    // --------------------------------------------------------------------------------------
+    // function HttpDELETE
+    // --------------------------------------------------------------------------------------
+    function HttpDELETE( object objHttp, variable i_strUri, variable i_strContent, variable i_strContentType, variable& o_intStatusCode) variable
+    {
+        variable response("");
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+
+
+
+        if(!CheckString(i_strUri, "i_strUri"))
+        {
+            response = "Parameter " + "i_strUri" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if( i_strUri == "" )
+        {
+            response = "Invalid Request - Uri is empty - i_strUri must be set to an HTTP Resource.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Request Uri: " + i_strUri);
+
+        if(!CheckString(i_strContent, "i_strContent"))
+        {
+            response = "Parameter " + "i_strContent" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+        if(!CheckString(i_strContentType, "i_strContentType"))
+        {
+            response = "Parameter " + "i_strContentType" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if(!CheckObject(objHttp))
+        {
+            response = HSLHttp_Class + "has not been created. Use HSLHttp::Initialize before calling other library functions.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if(blnSimulation)
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_COMPLETE, "Simulated.");
+            o_intStatusCode = 200;
+            response = "Simulated";
+            return(response);
+        }
+
+        response = objHttp.HttpDELETE(i_strUri, i_strContent, i_strContentType, o_intStatusCode);
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Response Status Code: " + IStr(o_intStatusCode));
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Response Content: " + response);
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+
+        return(response);
+
+    }   // HttpDELETE
+    
+
+    // --------------------------------------------------------------------------------------
+    // function GetResponseHeaders
+    // --------------------------------------------------------------------------------------
+    function GetResponseHeaders( object objHttp, variable& o_arrHeaderKeys[], variable& o_arrHeaderValues[]) variable
+    {
+        variable response("");
+        variable intReturn(0);
+        variable i(0);
+        variable strKey("");
+        variable strValue("");
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+
+        if(!CheckObject(objHttp))
+        {
+            response = HSLHttp_Class + "has not been created. Use HSLHttp::Initialize before calling other library functions.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if(blnSimulation)
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_COMPLETE, "Simulated.");
+            return(hslFalse);
+        }
+
+        intReturn = objHttp.GetResponseHeaders(o_arrHeaderKeys, o_arrHeaderValues);
+        if(intReturn != 0)
+        {
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, "Error getting HTTP Response Headers. Response Headers are populated upon a successful HTTP Request.");
+            return(intReturn);
+        }
+
+        for( i = 0; i < o_arrHeaderKeys.GetSize(); i++ )
+        {
+            strKey = o_arrHeaderKeys[i];
+            strValue = o_arrHeaderValues[i];
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, strKey + ": " + strValue);
+        }
+        
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+        return(intReturn);
+    }   // GetResponseHeaders
+
+
+    // --------------------------------------------------------------------------------------
+    // function GetRequestHeader
+    // --------------------------------------------------------------------------------------
+    function GetRequestHeaders( object objHttp, variable& o_arrHeaderKeys[], variable& o_arrHeaderValues[]) variable
+    {
+        variable response("");
+        variable intReturn(0);
+        variable i(0);
+        variable strKey("");
+        variable strValue("");
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+
+        if(!CheckObject(objHttp))
+        {
+            response = HSLHttp_Class + "has not been created. Use HSLHttp::Initialize before calling other library functions.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(hslTrue);
+        }
+
+        if(blnSimulation)
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_COMPLETE, "Simulated.");
+            return(hslFalse);
+        }
+
+        intReturn = objHttp.GetRequestHeaders(o_arrHeaderKeys, o_arrHeaderValues);
+
+        for( i = 0; i < o_arrHeaderKeys.GetSize(); i++ )
+        {
+            strKey = o_arrHeaderKeys[i];
+            strValue = o_arrHeaderValues[i];
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, strKey + ": " + strValue);
+        }
+        
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+        return(intReturn);
+    }   // GetRequestHeaders
+
+
+    // --------------------------------------------------------------------------------------
+    // function SetRequestHeader
+    // --------------------------------------------------------------------------------------
+    function SetRequestHeader( object objHttp, variable i_strKey, variable i_strValue) variable
+    {
+        variable response("");
+        variable intReturn(0);
+        variable i(0);
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+
+        if(!CheckObject(objHttp))
+        {
+            response = HSLHttp_Class + "has not been created. Use HSLHttp::Initialize before calling other library functions.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(hslTrue);
+        }
+
+        if(!CheckString(i_strKey, "i_strKey"))
+        {
+            return(hslTrue);
+        }
+        if(!CheckString(i_strValue, "i_strValue"))
+        {
+            return(hslTrue);
+        }
+
+        if(blnSimulation)
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_COMPLETE, "Simulated.");
+            return(hslFalse);
+        }
+
+        intReturn = objHttp.SetRequestHeader(i_strKey, i_strValue);
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Request Header Added: " + i_strKey + ": " + i_strValue);
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+
+        return(intReturn);
+    }   // SetRequestHeader
+
+
+    // --------------------------------------------------------------------------------------
+    // function RemoveRequestHeader
+    // --------------------------------------------------------------------------------------
+    function RemoveRequestHeader( object objHttp, variable i_strKey) variable
+    {
+        variable response("");
+        variable intReturn(0);
+        variable i(0);
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+
+        if(!CheckObject(objHttp))
+        {
+            response = HSLHttp_Class + "has not been created. Use HSLHttp::Initialize before calling other library functions.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(hslTrue);
+        }
+
+        if(!CheckString(i_strKey, "i_strKey"))
+        {
+            return(hslTrue);
+        }
+
+        if(blnSimulation)
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_COMPLETE, "Simulated.");
+            return(hslFalse);
+        }
+
+        intReturn = objHttp.RemoveRequestHeader(i_strKey);
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Request Header Removed: " + i_strKey);
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+
+        return(intReturn);
+    }   // RemoveRequestHeader
+
+
+    // --------------------------------------------------------------------------------------
+    // function HttpUpload
+    // --------------------------------------------------------------------------------------
+    function HttpUpload(object objHttp, variable i_strUri, variable i_strFilepath, variable i_strContent, variable i_strContentType, variable& o_intStatusCode ) variable
+    {
+
+        variable response("");
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+
+        if(!CheckString(i_strUri, "i_strUri"))
+        {
+            response = "Parameter " + "i_strUri" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if( i_strUri == "" )
+        {
+            response = "Invalid Request - Uri is empty - i_strUri must be set to an HTTP Resource.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Request Uri: " + i_strUri);
+
+        if(!CheckString(i_strContent, "i_strContent"))
+        {
+            response = "Parameter " + "i_strContent" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+        if(!CheckString(i_strContentType, "i_strContentType"))
+        {
+            response = "Parameter " + "i_strContentType" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+        if(!CheckString(i_strFilepath, "i_strFilepath"))
+        {   
+            response = "Parameter " + "i_strFilepath" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Request File: " + i_strFilepath);
+
+
+        if(!CheckObject(objHttp))
+        {
+            response = HSLHttp_Class + "has not been created. Use HSLHttp::Initialize before calling other library functions.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if(blnSimulation)
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_COMPLETE, "Simulated.");
+            o_intStatusCode = 200;
+            response = "Simulated";
+            return(response);
+        }
+
+        response = objHttp.HttpUpload( i_strUri, i_strFilepath, i_strContent, i_strContentType, o_intStatusCode);
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Response Status Code: " + IStr(o_intStatusCode));
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Response Content: " + response);
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+
+        return(response);
+
+    }   // HttpUpload
+
+
+    // --------------------------------------------------------------------------------------
+    // function HttpDownload
+    // --------------------------------------------------------------------------------------
+    function HttpDownload(object objHttp, variable i_strUri, variable i_strFilepath, variable i_blnOverwrite, variable& o_intStatusCode ) variable
+    {
+
+        variable response("");
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+
+        if( i_strUri == "" )
+        {
+            response = "Invalid Request - Uri is empty - i_strUri must be set to an HTTP Resource.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+        if(!CheckString(i_strUri, "i_strUri"))
+        {
+            response = "Parameter " + "i_strUri" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+        if(!CheckString(i_strFilepath, "i_strFilepath"))
+        {
+            response = "Parameter " + "i_strFilepath" + " is not of type string!";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+        if(!CheckIntegerRange(i_blnOverwrite, "i_blnOverwrite", hslFalse, hslTrue))
+        {
+            return(hslTrue);
+        }
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Request Uri: " + i_strUri);
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Request File: " + i_strFilepath);
+
+        if(!CheckObject(objHttp))
+        {
+            response = HSLHttp_Class + "has not been created. Use HSLHttp::Initialize before calling other library functions.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(response);
+        }
+
+
+        if(blnSimulation)
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_COMPLETE, "Simulated.");
+            o_intStatusCode = 200;
+            response = "Simulated";
+            return(response);
+        }
+
+        response = objHttp.HttpDownload( i_strUri, i_strFilepath, i_blnOverwrite, o_intStatusCode);
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Response Status Code: " + IStr(o_intStatusCode));
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Response Content: " + response);
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+        
+        return(response);
+
+    }   // HttpDownload
+
+
+    // --------------------------------------------------------------------------------------
+    // function SetAuthentication
+    // --------------------------------------------------------------------------------------
+    function SetAuthentication(object objHttp, variable i_strAuthentication, variable i_strUser, variable i_strPasswordOrToken) variable
+    {
+        variable strReturn("");
+        variable response("");
+        variable intReturn(0);
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+
+        if(!CheckObject(objHttp))
+        {
+            response = HSLHttp_Class + "has not been created. Use HSLHttp::Initialize before calling other library functions.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(hslTrue);
+        }
+
+        if(blnSimulation)
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_COMPLETE, "Simulated.");
+            return(hslFalse);
+        }
+
+        if(!CheckString(i_strAuthentication, "i_strAuthentication"))
+        {
+            return(hslTrue);
+        }
+        if(!CheckString(i_strUser, "i_strUser"))
+        {
+            return(hslTrue);
+        }
+        if(!CheckString(i_strPasswordOrToken, "i_strPasswordOrToken"))
+        {
+            return(hslTrue);
+        }
+
+        strReturn = objHttp.SetAuthentication(i_strAuthentication, i_strUser, i_strPasswordOrToken);
+        if(strReturn != "")
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_ERRCOMPLETE, "Error setting Http Authentication: " + i_strAuthentication + " - " + strReturn );
+            return(hslTrue);
+        }
+
+        if(i_strAuthentication == Authentication_None)
+        {
+            i_strAuthentication = "None";
+        }
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Http Authentication: " + i_strAuthentication);
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+
+        return(intReturn);
+    }   //SetAuthentication
+
+
+    // --------------------------------------------------------------------------------------
+    // function SetTimeout
+    // --------------------------------------------------------------------------------------
+    function SetTimeout(object objHttp, variable i_intTimeout) variable
+    {
+        variable strReturn("");
+        variable intReturn(0);
+        variable response("");
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+
+        if(!CheckObject(objHttp))
+        {
+            response = HSLHttp_Class + "has not been created. Use HSLHttp::Initialize before calling other library functions.";
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, response);
+            return(hslTrue);
+        }
+
+        if(blnSimulation)
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_COMPLETE, "Simulated.");
+            return(hslFalse);
+        }
+
+        strReturn = objHttp.SetTimeout(i_intTimeout);
+        if(strReturn != "")
+        {
+            StatusTrace(TRACE_LEVEL_NONE, GetFunctionName(), CMD_ERRCOMPLETE, "Error setting Http Client Timeout " + IStr(i_intTimeout) + " - " + strReturn);
+            return(hslTrue);
+        }
+
+        if(i_intTimeout == -1)
+        {
+            StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Http Timeout: Infinite");
+            StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+            return(intReturn);
+        }
+
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Http Timeout: " + IStr(i_intTimeout));
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+
+        return(intReturn);
+    }   // SetTimeout
+
+    // --------------------------------------------------------------------------------------
+    // function SetSimulation
+    // --------------------------------------------------------------------------------------
+    function SetSimulation(variable i_blnSimulation) variable 
+    {
+
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_START, "");
+        
+        if(!CheckIntegerRange(i_blnSimulation, "i_blnSimulation", hslFalse, hslTrue))
+        {
+            return(hslTrue);
+        }
+
+        blnSimulation = i_blnSimulation;
+        StatusTrace(TRACE_LEVEL_RELEASE, GetFunctionName(), CMD_PROGRESS, "Simulation: " + IStr(i_blnSimulation));
+        StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_COMPLETE, "");
+
+        return(hslFalse);
+    }   // SetSimulation
+
+
+    // --------------------------------------------------------------------------------------
+    // function SetTraceLevel
+    // --------------------------------------------------------------------------------------
+    function SetTraceLevel(variable i_intTraceLevel) variable
+    {
+        variable strFunctionName("");
+
+        strFunctionName = GetFunctionName();
+
+        if(CheckIntegerRange(i_intTraceLevel, "i_intTraceLevel", TRACE_LEVEL_NONE, TRACE_LEVEL_DEBUG) == hslFalse)
+        {
+            return (hslTrue);
+        }  
+
+        HSLHttp_TraceLevel = i_intTraceLevel;
+
+        return (hslFalse);
+    }   // SetTraceLevel
+
+
+    // --------------------------------------------------------------------------------------
+    // private / support functions
+    // --------------------------------------------------------------------------------------
+
+    // --------------------------------------------------------------------------------------
+    // function CheckObject
+    // --------------------------------------------------------------------------------------
+    private function CheckObject(object i_objObjectToCheck) variable
+    {
+        if(i_objObjectToCheck.IsNull())
+        {
+            StatusTrace(TRACE_LEVEL_DEBUG, GetFunctionName(), CMD_ERROR, HSLHttp_Class + "has not been created. Use HSLHttp::Initialize before calling other library functions.");
+            return(hslFalse);
+        }
+
+        return(hslTrue);
+    }   // CheckObject
+
+
+    // --------------------------------------------------------------------------------------
+    // function StatusTrace
+    // --------------------------------------------------------------------------------------
+    private function StatusTrace(variable i_intTraceLevel, variable i_strFunctionName, variable i_intState, variable i_strMessage ) void
+    {
+
+        if(i_intTraceLevel <= HSLHttp_TraceLevel)
+        {
+            i_strFunctionName = StrMid(i_strFunctionName, StrReverseFind(i_strFunctionName, ":") + 1, StrGetLength(i_strFunctionName));
+            FormatTrace(HSLHttp_TraceSource, i_strFunctionName, i_intState, " ", i_strMessage);
+        }
+    
+    }   // StatusTrace
+
+
+    // --------------------------------------------------------------------------------------
+    // function CheckString
+    // --------------------------------------------------------------------------------------
+    private function CheckString(variable i_varVariableToCheck, variable i_strTraceEntry ) variable
+    {
+        if(GetType(i_varVariableToCheck) == "s")
+        {
+            return (hslTrue);
+        }
+        FormatTrace(GetFunctionName(), CMD_ERRCOMPLETE, " ", "Parameter '" + i_strTraceEntry + "' is not of type string!");
+        return (hslFalse);
+    }   // CheckString
+
+
+    // --------------------------------------------------------------------------------------
+    // function CheckIntegerRange
+    // --------------------------------------------------------------------------------------
+    private function CheckIntegerRange(variable i_varVariableToCheck, variable i_strTraceEntry, variable i_intMin, variable i_intMax) variable
+    {
+        if(GetType(i_varVariableToCheck) == "i")
+        {
+            if(i_varVariableToCheck >= i_intMin && i_varVariableToCheck <= i_intMax)
+            {
+                return (hslTrue);
+            }
+            else
+            {
+                FormatTrace(GetFunctionName(), CMD_ERROR, " ", "Parameter '" + i_strTraceEntry + "'  is out of range (" + IStr(i_intMin) + ".." + IStr(i_intMax) + ") !");
+            }
+        }
+        else
+        {
+            FormatTrace(GetFunctionName(), CMD_ERROR, " ", "Parameter '" + i_strTraceEntry + "' is not of type integer!");
+        }
+        return (hslFalse);
+    }   // CheckIntegerRange
+
+
+}
+
+#endif // _HSLHttp_hsl__
+// $$author=Turman_w$$valid=1$$time=2020-07-30 12:38$$checksum=1295b22d$$length=087$$
