@@ -1,0 +1,3 @@
+@echo off
+echo Running Hamilton HSLHttp Installer...
+start "" "%~dp0Hamilton HSLHttp Library Installer Version 2.7.exe"

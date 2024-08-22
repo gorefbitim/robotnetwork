@@ -53,5 +53,10 @@ async def stuck_notification(
     else:
         raise HTTPException(status_code=500, detail="Failed to notify Slack.")
 
-if __name__ == "__main__":
+
+def main():
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+if __name__ == "__main__":
+    main()

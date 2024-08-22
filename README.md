@@ -69,14 +69,14 @@ notifications from your VENUS application based on any logic you implement.
 Follow these steps to create and set up a Slack app that can send notifications
 directly to your chosen Slack channel.
 
-1. **Create a Slack App:**
+2.1. **Create a Slack App:**
    - Go to the [Slack API](https://api.slack.com/apps) page and click on
      "Create New App" (ensure you are signed in).
    - Choose "From scratch," name your app, and select the Slack workspace
      where you want to send notifications.
    - Click "Create App."
 
-2. **Configure Incoming Webhooks:**
+2.2. **Configure Incoming Webhooks:**
    - In your app settings, navigate to "Incoming Webhooks" from the sidebar.
    - Enable the feature by toggling the activation switch to "On."
    - Click "Add New Webhook to Workspace" and choose the Slack channel
@@ -106,5 +106,35 @@ using the system's password directory.
 If USERPROFILE is not set, it combines HOMEPATH and HOMEDRIVE to determine the
 correct location.
 
-This setup provides a secure and convenient way to store sensitive configuration data,
-making it easily accessible for your application while maintaining good security practices.
+This setup provides a secure and convenient way to store sensitive
+configuration data, making it easily accessible for your application
+while maintaining good security practices.
+
+### 5. Setup VENUS method to send http requests to the server
+5.1  Install HSLHttp
+Before you can add Slack notifications to your VENUS methods, you need to
+install the HSLHttp tool. This installation is crucial for enabling HTTP
+requests from within VENUS scripts.
+
+On your VENUS (Windows) computer:
+```run_installer.bat```
+
+Safe and Verified Source: The HSLHttp tool is developed and distributed by
+Hamilton, ensuring that it is safe and reliable. This can be verified through
+the included installer and documentation files within the 'HSLHttp' directory
+in our repository.
+
+5.2: Incorporate HTTP Requests in Your Method
+Once HSLHttp is installed, you can add HTTP request capabilities to your VENUS
+methods to send notifications to the server.
+
+Modify Your VENUS Method: Integrate HTTP request sections into your VENUS method
+scripts. Use the provided aliquotes_1_3_slack.hsl file as a template for how to
+structure these requests within your method.
+
+## Conclusion
+By automating or guiding the installation of necessary tools and integrating
+HTTP functionality into your VENUS methods, you can enhance the automation
+capabilities of your lab setups, ensuring effective communication via Slack
+notifications.
+
